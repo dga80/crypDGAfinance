@@ -1,0 +1,17 @@
+# Environments
+venv/
+.env
+.venv
+env/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+# OS
+.DS_Store
+.idea/
+.vscode/
+# Data
+*.xlsx
+*.csv
+!resumen_fiscal_mexc.csv

@@ -568,6 +568,8 @@ def process_spot(df: pd.DataFrame, filename: str) -> dict:
         "filename": filename,
         "spot_fees": fees_total,
         "spot_pnl": spot_pnl,
+        "compras_total": compras_total if 'compras_total' in locals() else 0.0,
+        "ventas_total": ventas_total if 'ventas_total' in locals() else 0.0,
         "total_buy_qty": total_buy_qty,
         "total_sell_qty": total_sell_qty,
         "tx_types": tx_types,
@@ -675,13 +677,20 @@ if 'delete_idx' not in st.session_state:
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg", width=100)
-    st.markdown("### Configuración AI")
-    api_key = st.text_input("Gemini API Key", type="password", help="Obtén tu clave en Google AI Studio")
-    if api_key:
-        st.session_state.gemini_api_key = api_key
-        st.success("API Key configurada")
-    else:
-        st.info("💡 Introduce tu API Key para activar la autoevaluación y limpieza IA.")
+    
+    with st.expander("⚙️ Configuración AI", expanded=False):
+        st.markdown("---")
+        api_key_input = st.text_input(
+            "Gemini API Key", 
+            type="password", 
+            value=st.session_state.get("gemini_api_key", ""),
+            help="Obtén tu clave en Google AI Studio"
+        )
+        if api_key_input:
+            st.session_state.gemini_api_key = api_key_input
+            st.success("API Key cargada")
+        
+        st.info("💡 Si has configurado la clave en los Secrets de Streamlit o .env, la app la detectará automáticamente.")
 
 st.markdown("""
 <div class="hero-header">
@@ -718,15 +727,17 @@ with tab1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<p class="section-title">⚙️ Procesando archivos...</p>', unsafe_allow_html=True)
 
-        total_gross_profit   = 0.0
-        total_trading_fees   = 0.0
-        total_funding_fees   = 0.0
-        total_withdrawal_fees = 0.0
-        total_spot_fees      = 0.0
-        total_spot_pnl       = 0.0
-        all_xaman_transfers  = []
-        results_data         = []
-        file_summary_rows    = []
+        total_gross_profit    = 0.0
+        total_trading_fees    = 0.0
+        total_funding_fees    = 0.0
+        total_withdrawal_fees  = 0.0
+        total_spot_fees       = 0.0
+        total_spot_pnl        = 0.0
+        total_spot_compras    = 0.0
+        total_spot_ventas     = 0.0
+        all_xaman_transfers   = []
+        results_data          = []
+        file_summary_rows     = []
 
         for file in uploaded_files:
             with st.spinner(f'Analizando `{file.name}`...'):
@@ -749,6 +760,8 @@ with tab1:
                 elif tipo == "Spot":
                     total_spot_fees += result.get('spot_fees', 0)
                     total_spot_pnl  += result.get('spot_pnl', 0)
+                    total_spot_compras += result.get('compras_total', 0)
+                    total_spot_ventas  += result.get('ventas_total', 0)
 
                 tag_class = {
                     "Futuros": "tag-futuros",
@@ -802,6 +815,22 @@ with tab1:
         beneficio_bruto  = total_gross_profit + net_funding_profit + total_spot_pnl
         resultado_neto   = beneficio_bruto + gastos_deducibles
 
+        # ── DATOS PARA CASILLAS HACIENDA ──────────────────
+        # Agrupación por lotes para Casillas 1800-1814
+        # Transmisión: Ventas Spot + Ganancias Futuros/Funding
+        # Adquisición: Compras Spot + Comisiones + Pérdidas Futuros/Funding
+        
+        val_transmision = (total_spot_ventas + 
+                           max(total_gross_profit, 0) + 
+                           max(total_funding_fees, 0))
+        
+        val_adquisicion = (total_spot_compras + 
+                           abs(min(total_gross_profit, 0)) + 
+                           abs(min(total_funding_fees, 0)) + 
+                           abs(total_trading_fees) + 
+                           abs(total_spot_fees) + 
+                           abs(total_withdrawal_fees))
+        
         # Base de coste fiat
         total_fiat = sum(d["Importe (€)"] for d in st.session_state.fiat_deposits)
         ganancia_sobre_base = resultado_neto - total_fiat if total_fiat > 0 else resultado_neto
@@ -845,28 +874,24 @@ with tab1:
 
         summary_dict = {
             "Concepto": [
-                "Futures PNL Bruto (Closing PNL)",
-                "Spot PNL Estimado",
-                "Funding Fees Neto (Capital Flow)",
-                "Beneficio Bruto Total",
-                "Comisiones Futures trading",
-                "Comisiones Spot trading",
-                "Comisiones de Retiro",
-                "Total Gastos Deducibles",
+                "Valor de Adquisición Total (Compras + Comisiones + Pérdidas)",
+                "Valor de Transmisión Total (Ventas + Ganancias)",
                 "Resultado Neto Final (Casilla Hacienda)",
+                "Futures PNL Bruto",
+                "Spot PNL Estimado",
+                "Funding Fees Neto",
+                "Total Gastos Deducibles",
                 "Base de Coste Fiat (€)",
                 "Ganancia sobre Base de Coste"
             ],
             "Valor (USDT / €)": [
+                val_adquisicion,
+                val_transmision,
+                resultado_neto,
                 total_gross_profit,
                 total_spot_pnl,
                 net_funding,
-                beneficio_bruto,
-                deductible_trading,
-                deductible_spot,
-                deductible_withdraw,
                 gastos_deducibles,
-                resultado_neto,
                 total_fiat,
                 ganancia_sobre_base
             ]
@@ -907,6 +932,8 @@ with tab1:
             "deductible_withdraw": deductible_withdraw,
             "gastos_deducibles": gastos_deducibles,
             "resultado_neto": resultado_neto,
+            "val_adquisicion": val_adquisicion,
+            "val_transmision": val_transmision,
             "total_fiat": total_fiat,
             "ganancia_sobre_base": ganancia_sobre_base
         }
@@ -992,6 +1019,40 @@ with tab3:
     results = st.session_state.get('calc_results', None)
 
     if results:
+        # DATA FOR TAX FORM
+        st.markdown('<p class="section-title">🏠 Resumen para el Formulario de la Renta (Casillas 1800-1814)</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-desc">Copia estos valores en el apartado de Ganancias y Pérdidas Patrimoniales de la AEAT.</p>', unsafe_allow_html=True)
+        
+        col_h1, col_h2, col_h3 = st.columns(3)
+        with col_h1:
+            st.markdown(f"""
+            <div style="background: rgba(0,210,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(0,210,255,0.2); text-align: center;">
+                <p style="color:rgba(255,255,255,0.5); font-size:0.8rem; margin:0;">VALOR DE ADQUISICIÓN</p>
+                <h3 style="color:#ffffff; margin:0.5rem 0;">{results['val_adquisicion']:,.2f} €</h3>
+                <p style="font-size:0.7rem; color:rgba(255,255,255,0.3);">(Compras + Comisiones + Pérdidas)</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_h2:
+            st.markdown(f"""
+            <div style="background: rgba(0,210,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(0,210,255,0.2); text-align: center;">
+                <p style="color:rgba(255,255,255,0.5); font-size:0.8rem; margin:0;">VALOR DE TRANSMISIÓN</p>
+                <h3 style="color:#ffffff; margin:0.5rem 0;">{results['val_transmision']:,.2f} €</h3>
+                <p style="font-size:0.7rem; color:rgba(255,255,255,0.3);">(Ventas + Ganancias)</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_h3:
+            emoji = "🟢" if results['resultado_neto'] >= 0 else "🔴"
+            color = "#34d399" if results['resultado_neto'] >= 0 else "#f87171"
+            st.markdown(f"""
+            <div style="background: rgba({ '52,211,153' if results['resultado_neto'] >= 0 else '248,113,113' },0.1); padding: 1.5rem; border-radius: 12px; border: 1px solid {color}; text-align: center;">
+                <p style="color:rgba(255,255,255,0.5); font-size:0.8rem; margin:0;">RESULTADO NETO {emoji}</p>
+                <h3 style="color:{color}; margin:0.5rem 0;">{results['resultado_neto']:,.2f} €</h3>
+                <p style="font-size:0.7rem; color:rgba(255,255,255,0.3);">(Diferencia fiscal final)</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("---")
+
         # PIE CHART
         st.markdown('<p class="section-title">📊 Composición del Resultado</p>', unsafe_allow_html=True)
 
